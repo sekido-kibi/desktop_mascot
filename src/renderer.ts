@@ -9,26 +9,29 @@ interface MascotApi {
 }
 declare const mascot: MascotApi;
 
-type MascotState = "idle" | "click" | "walk" | "jump" | "sleep";
+type MascotState = "idle" | "click" | "walk" | "pose" | "sway" | "sleep";
 
 // 状態ごとのアニメーション（画像番号は imgs/mouse_slime_N.png の N）
 const ANIMATIONS: Record<MascotState, { frames: number[]; interval: number; loop: boolean }> = {
-  idle: { frames: [1, 2], interval: 600, loop: true },
+  idle: { frames: [1], interval: 1000, loop: true },
   click: { frames: [5, 3, 1], interval: 120, loop: false },
-  // しゃがむ(5) → 伸びて空中(1) → 着地でつぶれる(5)
-  walk: { frames: [5, 1, 1, 1, 5], interval: 120, loop: true },
-  jump: { frames: [5, 1, 1, 1, 1, 5], interval: 120, loop: false },
+  // 1 周 = 1 ホップ（地上 1 コマ・空中 3 コマ・地上 1 コマ）。上下移動は hop() で付ける
+  walk: { frames: [1, 1, 1, 1, 1], interval: 120, loop: true },
+  // 画像2を 3 秒表示して戻る
+  pose: { frames: [2], interval: 3000, loop: false },
+  // 画像4で 5 秒間左右に揺れて戻る。揺れは sway() で付ける
+  sway: { frames: [4], interval: 5000, loop: false },
   sleep: { frames: [6], interval: 1000, loop: true },
 };
 
 const SLEEP_AFTER_MS = 60_000;
 const DRAG_THRESHOLD = 3;
-const DOUBLE_CLICK_MS = 250;
 const BUBBLE_MS = 4000;
-const WALK_CHECK_MS = 4000;
-const WALK_CHANCE = 0.3;
-const JUMP_HEIGHT_PX = 60;
+const ACTION_CHECK_MS = 4000;
+const ACTION_CHANCE = 0.3;
 const HOP_HEIGHT_PX = 20;
+const SWAY_DEG = 10;
+const SWAY_PERIOD_MS = 1000;
 const WALK_STEP_MS = 50;
 const WALK_STEP_PX = 3;
 const CLICK_LINES = ["ぷるん", "なあに？", "つつかないで〜", "えへへ", "ぽよん！"];
@@ -47,8 +50,8 @@ function setState(next: MascotState) {
   frameIndex = 0;
   window.clearTimeout(frameTimer);
   motion?.cancel();
-  if (next === "jump") jump();
   if (next === "walk") hop();
+  if (next === "sway") sway();
   tick();
 }
 
@@ -94,18 +97,18 @@ mascot.onSay((text, ms) => {
   say(text, ms);
 });
 
-// ---- ジャンプ：しゃがみの 1 コマ後に飛び上がり、空中 4 コマ分で着地 ----
-function jump() {
-  const { interval } = ANIMATIONS.jump;
+// ---- 揺れ：足元を軸に左右へ傾く ----
+function sway() {
   motion = sprite.animate([
-    { transform: "translateY(0)", easing: "ease-out" },
-    { transform: `translateY(-${JUMP_HEIGHT_PX}px)`, easing: "ease-in" },
-    { transform: "translateY(0)" },
-  ], { duration: interval * 4, delay: interval });
+    { transform: "rotate(0deg)", easing: "ease-out" },
+    { transform: `rotate(-${SWAY_DEG}deg)`, easing: "ease-in" },
+    { transform: "rotate(0deg)", easing: "ease-out" },
+    { transform: `rotate(${SWAY_DEG}deg)`, easing: "ease-in" },
+    { transform: "rotate(0deg)" },
+  ], { duration: SWAY_PERIOD_MS, iterations: ANIMATIONS.sway.interval / SWAY_PERIOD_MS });
 }
 
 // ---- 歩き回り：小さく跳ねながら進む ----
-// walk アニメ 1 周（しゃがみ 1 コマ・空中 3 コマ・着地 1 コマ）が 1 ホップ
 const HOP_MS = ANIMATIONS.walk.frames.length * ANIMATIONS.walk.interval;
 const HOP_AIR_START = 1 / 5;
 const HOP_AIR_END = 4 / 5;
@@ -144,9 +147,17 @@ async function walk() {
   mascot.walkEnd();
 }
 
+// 待機中にときどき「歩く・ポーズ・揺れる」のどれかを等確率で行う
+const IDLE_ACTIONS: (() => void)[] = [
+  () => void walk(),
+  () => setState("pose"),
+  () => setState("sway"),
+];
+
 window.setInterval(() => {
-  if (state === "idle" && !walking && !dragStart && Math.random() < WALK_CHANCE) void walk();
-}, WALK_CHECK_MS);
+  if (state !== "idle" || walking || dragStart || Math.random() >= ACTION_CHANCE) return;
+  IDLE_ACTIONS[Math.floor(Math.random() * IDLE_ACTIONS.length)]();
+}, ACTION_CHECK_MS);
 
 // ---- クリック透過：キャラと吹き出しの上だけマウスを受け付ける ----
 let ignoring = true;
@@ -165,24 +176,7 @@ document.addEventListener("mouseleave", () => {
   if (!dragStart) setIgnore(true);
 });
 
-// ---- ドラッグで移動、ほぼ動かさずに離したらクリック、2 回続けたらダブルクリック ----
-let clickTimer: number | undefined;
-
-function onClick() {
-  if (clickTimer !== undefined) {
-    // ダブルクリック：保留中のシングルクリックは取り消してジャンプ
-    window.clearTimeout(clickTimer);
-    clickTimer = undefined;
-    setState("jump");
-    return;
-  }
-  clickTimer = window.setTimeout(() => {
-    clickTimer = undefined;
-    setState("click");
-    say(CLICK_LINES[Math.floor(Math.random() * CLICK_LINES.length)]);
-  }, DOUBLE_CLICK_MS);
-}
-
+// ---- ドラッグで移動、ほぼ動かさずに離したらクリック扱い ----
 let dragStart: { x: number; y: number } | null = null;
 let last = { x: 0, y: 0 };
 let dragged = false;
@@ -197,7 +191,7 @@ sprite.addEventListener("pointerdown", (e) => {
 sprite.addEventListener("pointermove", (e) => {
   if (!dragStart) return;
   if (!dragged && Math.hypot(e.screenX - dragStart.x, e.screenY - dragStart.y) < DRAG_THRESHOLD) return;
-  if (!dragged && (state === "walk" || state === "jump")) setState("idle");
+  if (!dragged && state !== "idle") setState("idle");
   dragged = true;
   mascot.dragMove(e.screenX - last.x, e.screenY - last.y);
   last = { x: e.screenX, y: e.screenY };
@@ -206,8 +200,12 @@ sprite.addEventListener("pointermove", (e) => {
 sprite.addEventListener("pointerup", () => {
   if (!dragStart) return;
   dragStart = null;
-  if (dragged) mascot.dragEnd();
-  else onClick();
+  if (dragged) {
+    mascot.dragEnd();
+  } else {
+    setState("click");
+    say(CLICK_LINES[Math.floor(Math.random() * CLICK_LINES.length)]);
+  }
   resetSleepTimer();
 });
 

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "lib": ["es2022", "dom"],
+    "types": ["node"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "moduleDetection": "auto",
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "desktop_mascot",
+  "version": "0.1.0",
+  "description": "Desktop mascot - mouse slime",
+  "main": "dist/main.js",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "start": "tsc && electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,59 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  font-family: "Yu Gothic UI", "Meiryo", sans-serif;
+}
+
+#sprite {
+  width: 100px;
+  height: 100px;
+  image-rendering: pixelated;
+  cursor: grab;
+}
+
+#sprite:active {
+  cursor: grabbing;
+}
+
+#bubble {
+  position: relative;
+  max-width: 180px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 2px solid #333;
+  border-radius: 10px;
+  background: #fff;
+  color: #222;
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-all;
+  cursor: pointer;
+}
+
+#bubble[hidden] {
+  display: none;
+}
+
+/* しっぽ */
+#bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top: 8px solid #333;
+  border-bottom: 0;
+}

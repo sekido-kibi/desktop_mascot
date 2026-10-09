@@ -11,3 +11,7 @@ desktop.ini
 # Logs / temp
 *.log
 *.tmp
+
+# Node / build
+node_modules/
+dist/

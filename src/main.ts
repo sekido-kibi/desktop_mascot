@@ -8,11 +8,14 @@ const WIN_H = 180;
 const SNAP_TO_GROUND_PX = 40;
 const ROOT = path.join(__dirname, "..");
 
-type SavedState = { x: number; y: number; chime: boolean };
+type SavedState = { x: number; y: number; chime: boolean; sound: boolean };
+// alarm: 止めるまで鳴らし続ける / soft: 控えめに 1 回
+type Sound = "alarm" | "soft";
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let chime = true;
+let sound = true;
 
 const statePath = () => path.join(app.getPath("userData"), "state.json");
 
@@ -20,6 +23,7 @@ function loadState(): Partial<SavedState> {
   try {
     const s = JSON.parse(fs.readFileSync(statePath(), "utf8")) as Partial<SavedState>;
     if (typeof s.chime === "boolean") chime = s.chime;
+    if (typeof s.sound === "boolean") sound = s.sound;
     // 保存位置が現在のどのディスプレイ上にもなければ無視する
     const onScreen = typeof s.x === "number" && typeof s.y === "number" &&
       screen.getAllDisplays().some(({ workArea: a }) =>
@@ -33,7 +37,7 @@ function loadState(): Partial<SavedState> {
 function saveState() {
   if (!win) return;
   const [x, y] = win.getPosition();
-  const s: SavedState = { x, y, chime };
+  const s: SavedState = { x, y, chime, sound };
   try {
     fs.writeFileSync(statePath(), JSON.stringify(s));
   } catch (e) {
@@ -67,6 +71,8 @@ function createWindow() {
     hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
+      // 操作なしでも通知音を鳴らせるようにする
+      autoplayPolicy: "no-user-gesture-required",
     },
   });
   win.setAlwaysOnTop(true, "screen-saver");
@@ -75,10 +81,11 @@ function createWindow() {
   win.loadFile(path.join(ROOT, "renderer", "index.html"));
 }
 
-function say(text: string, ms?: number) {
+// ms = 0 ならクリックされるまで表示し続ける
+function say(text: string, ms?: number, soundType?: Sound) {
   if (!win) return;
   if (!win.isVisible()) win.showInactive();
-  win.webContents.send("say", text, ms);
+  win.webContents.send("say", text, ms, sound ? soundType : undefined);
 }
 
 function toggleVisible() {
@@ -107,7 +114,7 @@ function startTimer(minutes: number) {
   stopTimer();
   timer = { minutes, timeout: setTimeout(() => {
     timer = null;
-    say(`${minutes}分たったよ！`, 15000);
+    say(`${minutes}分たったよ！`, 0, "alarm");
     updateTrayMenu();
   }, minutes * 60_000) };
   say(`${minutes}分はかるね`);
@@ -129,8 +136,8 @@ let pomodoro: { timeout: NodeJS.Timeout; phase: "work" | "break" } | null = null
 function runPomodoro(phase: "work" | "break") {
   const minutes = phase === "work" ? POMODORO_WORK_MIN : POMODORO_BREAK_MIN;
   pomodoro = { phase, timeout: setTimeout(() => {
-    if (phase === "work") say(`おつかれさま！${POMODORO_BREAK_MIN}分休憩しよう`, 15000);
-    else say("休憩おわり！作業再開だよ", 15000);
+    if (phase === "work") say(`おつかれさま！${POMODORO_BREAK_MIN}分休憩しよう`, 15000, "soft");
+    else say("休憩おわり！作業再開だよ", 15000, "soft");
     runPomodoro(phase === "work" ? "break" : "work");
   }, minutes * 60_000) };
   updateTrayMenu();
@@ -146,6 +153,18 @@ function togglePomodoro() {
     say(`${POMODORO_WORK_MIN}分がんばろう！`);
     runPomodoro("work");
   }
+}
+
+// ---- PC 起動時の自動実行 ----
+// 開発時は electron.exe にプロジェクトのパスを渡して起動する
+const loginArgs = () => (app.isPackaged ? [] : [app.getAppPath()]);
+
+function isAutoStart() {
+  return app.getLoginItemSettings({ args: loginArgs() }).openAtLogin;
+}
+
+function setAutoStart(enabled: boolean) {
+  app.setLoginItemSettings({ openAtLogin: enabled, args: loginArgs() });
 }
 
 // ---- トレイ ----
@@ -180,6 +199,22 @@ function updateTrayMenu() {
       type: "checkbox",
       checked: chime,
       click: (item) => { chime = item.checked; saveState(); },
+    },
+    {
+      label: "音",
+      type: "checkbox",
+      checked: sound,
+      click: (item) => {
+        sound = item.checked;
+        if (!sound) win?.webContents.send("stop-sound");
+        saveState();
+      },
+    },
+    {
+      label: "PC起動時に自動実行",
+      type: "checkbox",
+      checked: isAutoStart(),
+      click: (item) => setAutoStart(item.checked),
     },
     { type: "separator" },
     { label: "終了", click: () => app.quit() },

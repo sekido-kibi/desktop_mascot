@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("mascot", {
   dragEnd: () => ipcRenderer.send("drag-end"),
   walkStep: (dx: number): Promise<boolean> => ipcRenderer.invoke("walk-step", dx),
   walkEnd: () => ipcRenderer.send("walk-end"),
-  onSay: (cb: (text: string, ms?: number) => void) =>
-    ipcRenderer.on("say", (_e, text: string, ms?: number) => cb(text, ms)),
+  onSay: (cb: (text: string, ms?: number, sound?: "alarm" | "soft") => void) =>
+    ipcRenderer.on("say", (_e, text: string, ms?: number, sound?: "alarm" | "soft") => cb(text, ms, sound)),
+  onStopSound: (cb: () => void) => ipcRenderer.on("stop-sound", () => cb()),
 });

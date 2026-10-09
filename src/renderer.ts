@@ -5,7 +5,8 @@ interface MascotApi {
   dragEnd(): void;
   walkStep(dx: number): Promise<boolean>;
   walkEnd(): void;
-  onSay(cb: (text: string, ms?: number) => void): void;
+  onSay(cb: (text: string, ms?: number, sound?: "alarm" | "soft") => void): void;
+  onStopSound(cb: () => void): void;
 }
 declare const mascot: MascotApi;
 
@@ -34,6 +35,9 @@ const SWAY_DEG = 10;
 const SWAY_PERIOD_MS = 1000;
 const WALK_STEP_MS = 50;
 const WALK_STEP_PX = 3;
+const ALARM_REPEAT_MS = 1000;
+const ALARM_MAX_MS = 60_000;
+const SOUND_GAIN = 0.3; // 音量は PC の音量設定に任せ、アプリ側では固定
 const CLICK_LINES = ["ぷるん", "なあに？", "つつかないで〜", "えへへ", "ぽよん！"];
 
 const sprite = document.getElementById("sprite") as HTMLImageElement;
@@ -74,14 +78,59 @@ function resetSleepTimer() {
   sleepTimer = window.setTimeout(() => setState("sleep"), SLEEP_AFTER_MS);
 }
 
+// ---- 通知音（Web Audio で生成） ----
+let audio: AudioContext | undefined;
+let alarmTimer: number | undefined;
+let alarmStopTimer: number | undefined;
+
+function tone(freq: number, start: number, duration: number) {
+  audio ??= new AudioContext();
+  const t = audio.currentTime + start;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  osc.frequency.value = freq;
+  // 立ち上がりと減衰を付けてプツッという音を防ぐ
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(SOUND_GAIN, t + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+  osc.connect(gain).connect(audio.destination);
+  osc.start(t);
+  osc.stop(t + duration);
+}
+
+// 「ピピピッ」
+function playAlarmOnce() {
+  for (let i = 0; i < 3; i++) tone(1760, i * 0.15, 0.1);
+}
+
+// 低めでやわらかい「ポーン」
+function playSoft() {
+  tone(660, 0, 1.2);
+}
+
+function startAlarm() {
+  stopSound();
+  playAlarmOnce();
+  alarmTimer = window.setInterval(playAlarmOnce, ALARM_REPEAT_MS);
+  alarmStopTimer = window.setTimeout(stopSound, ALARM_MAX_MS);
+}
+
+function stopSound() {
+  window.clearInterval(alarmTimer);
+  window.clearTimeout(alarmStopTimer);
+}
+
+mascot.onStopSound(stopSound);
+
 // ---- 吹き出し ----
 let bubbleTimer: number | undefined;
 
+// ms = 0 ならクリックされるまで表示し続ける
 function say(text: string, ms = BUBBLE_MS) {
   bubble.textContent = text;
   bubble.hidden = false;
   window.clearTimeout(bubbleTimer);
-  bubbleTimer = window.setTimeout(hideBubble, ms);
+  if (ms > 0) bubbleTimer = window.setTimeout(hideBubble, ms);
 }
 
 function hideBubble() {
@@ -89,12 +138,17 @@ function hideBubble() {
   window.clearTimeout(bubbleTimer);
 }
 
-bubble.addEventListener("click", hideBubble);
+bubble.addEventListener("click", () => {
+  stopSound();
+  hideBubble();
+});
 
-mascot.onSay((text, ms) => {
+mascot.onSay((text, ms, sound) => {
   if (state === "sleep") setState("idle");
   resetSleepTimer();
   say(text, ms);
+  if (sound === "alarm") startAlarm();
+  if (sound === "soft") playSoft();
 });
 
 // ---- 揺れ：足元を軸に左右へ傾く ----
@@ -203,6 +257,7 @@ sprite.addEventListener("pointerup", () => {
   if (dragged) {
     mascot.dragEnd();
   } else {
+    stopSound();
     setState("click");
     say(CLICK_LINES[Math.floor(Math.random() * CLICK_LINES.length)]);
   }
